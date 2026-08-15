@@ -1,0 +1,19 @@
+# 가상환경 (각자 requirements.txt로 재설치하는 것이 원칙)
+venv/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 영상 파일 (용량이 크고 저작권 문제 소지 — 사용자가 직접 준비/다운로드)
+data/
+
+# MediaPipe 모델 파일 (9MB 바이너리 — README의 다운로드 명령으로 받기)
+models/
+
+# 포즈 추정 도구 비교(benchmark_pose_tools.py)를 돌리면 자동으로 받아지는 가중치.
+# yolo11x-pose.pt는 113MB라 GitHub 파일 크기 제한(100MB)에 걸린다.
+*.pt
+
+# 실행 결과물 (코드를 돌리면 재생성됨)
+output/

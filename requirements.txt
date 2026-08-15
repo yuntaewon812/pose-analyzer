@@ -1,0 +1,12 @@
+# 프로젝트2: 운동 동작 비교 분석 - 의존성
+# 설치: pip install -r requirements.txt
+opencv-python
+mediapipe
+matplotlib
+numpy
+pandas
+streamlit
+yt-dlp
+anthropic
+pydantic          # LLM 피드백의 출력 형식을 고정하는 데 사용 (generate_feedback_llm.py)
+imageio-ffmpeg
