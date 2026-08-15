@@ -232,16 +232,49 @@ def save_upload(uploaded, dest):
     dest.write_bytes(uploaded.getbuffer())
 
 
+def fetch_link(url, dest, log=lambda m: None):
+    """유튜브 등 링크에서 영상을 받아 dest에 저장한다.
+
+    download_video.py의 다운로드 로직을 그대로 쓴다(유튜브가 403으로 막는 경우를
+    피하려고 여러 클라이언트를 순서대로 시도하는 설정이 거기에 들어 있다).
+    """
+    from download_video import download
+    log(f"영상 받는 중: {url}")
+    download(url, dest.name)          # download()는 data/videos/ 아래에 저장한다
+    if not dest.exists():
+        raise RuntimeError("다운로드는 끝났는데 파일이 만들어지지 않았습니다.")
+    log(f"받기 완료: {dest.name} ({dest.stat().st_size / 1e6:.1f}MB)")
+
+
 with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_required_files() != []):
     st.caption(
         "정답 영상과 내 영상을 올린 뒤 **분석 실행**을 누르면 관절 추출부터 비교 영상까지 다시 만듭니다. "
         "영상 길이에 따라 몇 분 걸립니다 (관절 추출이 대부분)."
     )
+    src_mode = st.radio(
+        "영상을 어떻게 넣을까요?", ["파일 올리기", "링크 붙여넣기"],
+        horizontal=True, key="src_mode",
+        help="유튜브 링크를 붙여넣으면 앱이 직접 받아옵니다.")
+
+    up_ref = up_mine = None
+    link_ref = link_mine = ""
     uc1, uc2 = st.columns(2)
-    with uc1:
-        up_ref = st.file_uploader("정답 영상 (mp4)", type=["mp4", "mov", "avi"], key="up_ref")
-    with uc2:
-        up_mine = st.file_uploader("내 영상 (mp4)", type=["mp4", "mov", "avi"], key="up_mine")
+    if src_mode == "파일 올리기":
+        with uc1:
+            up_ref = st.file_uploader("정답 영상 (mp4)", type=["mp4", "mov", "avi"], key="up_ref")
+        with uc2:
+            up_mine = st.file_uploader("내 영상 (mp4)", type=["mp4", "mov", "avi"], key="up_mine")
+    else:
+        with uc1:
+            link_ref = st.text_input("정답 영상 링크", key="link_ref",
+                                     placeholder="https://www.youtube.com/watch?v=...")
+        with uc2:
+            link_mine = st.text_input("내 영상 링크", key="link_mine",
+                                      placeholder="https://www.youtube.com/watch?v=...")
+        st.caption(
+            "유튜브를 비롯해 yt-dlp가 지원하는 사이트 링크, 직접 mp4 주소도 됩니다. "
+            "비공개·연령 제한 영상은 받을 수 없습니다."
+        )
 
     auto_detect = st.checkbox(
         "돌핀킥 구간 자동 검출 (권장)", value=True,
@@ -260,20 +293,37 @@ with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_r
                                  help="0이면 끝까지")
 
     if st.button("분석 실행", type="primary"):
+        box = st.container()
+        lines = []
+
+        def log(msg):
+            lines.append(str(msg))
+            box.code("\n".join(lines[-14:]))
+
         if up_ref is not None:
             save_upload(up_ref, REF_VIDEO)
         if up_mine is not None:
             save_upload(up_mine, MINE_VIDEO)
-        if not REF_VIDEO.exists() or not MINE_VIDEO.exists():
+
+        # 링크가 들어왔으면 먼저 받아온다. 받기에 실패하면 그 사실만 알리고
+        # 분석으로 넘어가지 않는다 (예전 영상으로 엉뚱하게 분석되는 것을 막는다).
+        download_failed = False
+        for url, dest, label in [(link_ref.strip(), REF_VIDEO, "정답 영상"),
+                                 (link_mine.strip(), MINE_VIDEO, "내 영상")]:
+            if not url:
+                continue
+            try:
+                with st.spinner(f"{label} 받는 중…"):
+                    fetch_link(url, dest, log)
+            except Exception as exc:
+                st.error(f"{label}을(를) 받지 못했습니다: {exc}")
+                download_failed = True
+
+        if download_failed:
+            st.info("링크가 올바른지, 비공개·연령 제한 영상은 아닌지 확인해 주세요.")
+        elif not REF_VIDEO.exists() or not MINE_VIDEO.exists():
             st.error("정답 영상과 내 영상이 모두 필요합니다.")
         else:
-            box = st.container()
-            lines = []
-
-            def log(msg):
-                lines.append(str(msg))
-                box.code("\n".join(lines[-14:]))
-
             try:
                 with st.spinner("분석 중… 관절 추출이 가장 오래 걸립니다"):
                     run_all(
