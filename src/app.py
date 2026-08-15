@@ -310,23 +310,9 @@ with col_v2:
     if MINE_VIDEO.exists():
         st.video(str(MINE_VIDEO))
 
-st.subheader("🔧 가장 먼저 고치면 좋을 3가지")
-cols = st.columns(3)
-for col, (name, s) in zip(cols, ranked[:3]):
-    with col:
-        st.markdown(f"**{fb.JOINT_LABELS[name]}**")
-        st.write(fb.action_phrase(name, s))
-        st.caption(f"평균 {s['mean_abs']:.0f}° 차이 · 최대 {s['worst_diff']:+.0f}° ({s['worst_pct']:.0f}% 지점)")
-
-st.subheader("✅ 이미 잘 유지되고 있는 부분")
-st.caption("고칠 점만 보면 지금 하고 있는 자세/방향이 맞는지 알기 어려우니, 정답과 가장 비슷하게 맞고 있는 부분도 함께 보여줍니다.")
-best_cols = st.columns(3)
-best_ranked = sorted(stats.items(), key=lambda kv: kv[1]["mean_abs"])[:3]
-for rank, (col, (name, s)) in enumerate(zip(best_cols, best_ranked)):
-    with col:
-        st.markdown(f"**{fb.JOINT_LABELS[name]}**")
-        st.write("정답과 비슷한 각도를 잘 유지하고 있어요")
-        st.caption(f"평균 {s['mean_abs']:.0f}° 차이 (8개 관절 중 {rank + 1}번째로 작음)")
+st.caption(
+    "고칠 점은 아래 **📝 피드백 & 문제 장면** 탭에서 관절마다 영상과 함께 봅니다."
+)
 
 st.divider()
 
@@ -575,6 +561,17 @@ with tab4:
             f"({'정답보다 더 굽힘' if s['worst_diff'] < 0 else '정답보다 덜 굽힘'})"
         )
         st.divider()
+
+    # 고칠 점만 나열하면 "지금 하고 있는 게 맞는 방향인지" 알 수 없어서,
+    # 정답과 가장 비슷하게 맞고 있는 관절도 함께 보여준다.
+    st.subheader("✅ 이미 잘 유지되고 있는 부분")
+    best_cols = st.columns(3)
+    best_ranked = sorted(stats.items(), key=lambda kv: kv[1]["mean_abs"])[:3]
+    for rank, (col, (name, s)) in enumerate(zip(best_cols, best_ranked)):
+        with col:
+            st.markdown(f"**{fb.JOINT_LABELS[name]}**")
+            st.write("정답과 비슷한 각도를 잘 유지하고 있어요")
+            st.caption(f"평균 {s['mean_abs']:.0f}° 차이 ({len(stats)}개 관절 중 {rank + 1}번째로 작음)")
 
     if llm and llm.get("encouragement"):
         st.success(llm["encouragement"])
