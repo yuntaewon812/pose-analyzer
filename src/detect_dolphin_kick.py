@@ -25,6 +25,21 @@
 여기에 데이터 품질(무릎이 실제로 검출됐는지)도 함께 봅니다. 물거품에 다리가
 가려지면 이후 분석을 할 수 없기 때문입니다.
 
+[자유형 영상으로 검증하다 발견한 것 - 위 네 가지로는 부족했다]
+자유형 영상 2개로 시험했더니 7곳이 돌핀킥으로 잘못 잡혔습니다. 원인은 자유형의
+"글라이드 순간"입니다. 팔을 뻗고 미끄러지는 그 1초 동안은 팔 움직임(0.006~0.126)도
+어깨 비대칭(0도)도 돌핀킥과 똑같이 보이고, 플러터킥의 발 진폭(1.04~1.67)도 진짜
+돌핀킥(1.72)과 겹칩니다. 그래서 두 가지를 더 봅니다:
+
+  5) 엉덩이 상하 진폭 (hip_amp) - 돌핀킥은 몸 전체가 물결쳐 엉덩이가 오르내리지만,
+     플러터킥은 엉덩이를 고정한 채 다리만 젓습니다.
+  6) 구간 길이 (MIN_SEGMENT_SEC) - 진짜 돌핀킥은 여러 번 연속으로 차서 2초 이상
+     이어지지만, 자유형의 글라이드는 1~1.75초로 짧게 끊깁니다.
+
+주의: 이 두 기준값은 영상 4개(돌핀킥 2 + 자유형 2)로 정한 것이라 표본이 적습니다.
+새 영상에서 놓치거나 잘못 잡으면 상단 상수를 조정하고, 반드시 기존 4개 영상으로
+다시 확인하세요(하나를 맞추려다 다른 것이 깨지기 쉽습니다).
+
 사용법:
     python src/detect_dolphin_kick.py --landmarks output/mine/pose_landmarks.csv --angles output/mine/joint_angles.csv
     python src/detect_dolphin_kick.py --landmarks ... --angles ... --output output/mine/dolphin_segments.csv
@@ -42,11 +57,14 @@ MAX_SHOULDER_ASYM = 35.0  # 이보다 크면 한쪽 팔만 뻗은 상태 = 자�
 MIN_ARM_EXT = 135.0       # 양팔이 이만큼은 뻗어 있어야 스트림라인
 MIN_FOOT_AMP = 1.0        # 이보다 작으면 차지 않고 흘러가는 중 = 글라이드
 MIN_PERIODICITY = 0.15    # 발 신호가 주기적이어야 "킥"
+MIN_HIP_AMP = 0.30        # 엉덩이가 이만큼 오르내려야 돌핀킥 (플러터킥과 가르는 기준)
 MIN_KNEE_COVERAGE = 0.6   # 무릎이 이만큼은 검출돼야 이후 분석 가능
 
 WINDOW_SEC = 1.0          # 판정 창 크기 (킥 1~2회가 들어갈 정도)
 HOP_SEC = 0.25            # 창을 옮기는 간격
-MIN_SEGMENT_SEC = 1.0     # 이보다 짧은 구간은 버림
+MIN_SEGMENT_SEC = 2.0     # 이보다 짧은 구간은 버림. 진짜 돌핀킥은 여러 번 연속으로
+                          # 차므로 2초 이상 이어지지만, 자유형 글라이드가 잠깐 돌핀킥처럼
+                          # 보이는 구간은 1~1.75초로 짧게 끊긴다.
 BRIDGE_SEC = 0.5          # 이만큼 이내로 끊긴 구간은 하나로 이어붙임
 
 
@@ -105,10 +123,16 @@ def window_features(lm_win, ang_win):
     foot_amp = float((np.nanmax(fy) - np.nanmin(fy)) / torso) if np.isfinite(fy).any() else 0.0
     period = periodicity(-fy)
 
+    # 엉덩이가 위아래로 얼마나 오르내리는지. 돌핀킥은 몸 전체가 물결치므로 엉덩이가
+    # 크게 움직이지만, 자유형의 플러터킥은 엉덩이를 고정한 채 다리만 젓는다.
+    # 발 진폭만으로는 두 킥이 구분되지 않아서(자유형 영상에서 1.04~1.67로 진짜
+    # 돌핀킥 1.72와 겹쳤다) 이 신호를 함께 본다.
+    hip_amp = float((np.nanmax(hy) - np.nanmin(hy)) / torso) if np.isfinite(hy).any() else 0.0
+
     knee_cov = float(ang_win["left_knee"].notna().mean())
 
     return dict(arm_move=arm_move, arm_ext=arm_ext, shoulder_asym=shoulder_asym,
-                foot_amp=foot_amp, period=period, knee_cov=knee_cov)
+                foot_amp=foot_amp, period=period, hip_amp=hip_amp, knee_cov=knee_cov)
 
 
 def failure_reasons(f, min_foot_amp):
@@ -131,6 +155,8 @@ def failure_reasons(f, min_foot_amp):
         out.append(f"좌우 어깨 비대칭 {f['shoulder_asym']:.0f}도 (자유형 의심)")
     if f["foot_amp"] < min_foot_amp:
         out.append(f"발 진폭 작음 {f['foot_amp']:.2f} (글라이드 의심)")
+    if f["hip_amp"] < MIN_HIP_AMP:
+        out.append(f"엉덩이 움직임 작음 {f['hip_amp']:.2f} (플러터킥 의심)")
     if f["period"] < MIN_PERIODICITY:
         out.append(f"주기성 낮음 {f['period']:.2f}")
     if f["knee_cov"] < MIN_KNEE_COVERAGE:

@@ -42,6 +42,10 @@ def download(url: str, filename: str) -> None:
         "outtmpl": str(dest),
         # 이미 있으면 덮어쓰지 않고 물어보지 않게(스크립트 재실행 편의를 위해 덮어쓰기)
         "overwrites": True,
+        # 유튜브 기본 경로가 "HTTP Error 403: Forbidden"으로 막히는 경우가 있어서
+        # 앱(클라이언트) 종류를 여러 개 지정해 순서대로 시도하게 한다. 하나가 막혀도
+        # 다른 것으로 넘어가므로 성공률이 크게 올라간다.
+        "extractor_args": {"youtube": {"player_client": ["android", "web_safari", "tv"]}},
     }
 
     with yt_dlp.YoutubeDL(options) as ydl:
