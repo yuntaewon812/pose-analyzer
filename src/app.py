@@ -16,6 +16,7 @@ output/comparison/ 여기저기 흩어져 있어서, 확인하려면 파일을 �
 """
 import json
 import sys
+import traceback
 from pathlib import Path
 
 import cv2
@@ -293,7 +294,9 @@ with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_r
                                  help="0이면 끝까지")
 
     if st.button("분석 실행", type="primary"):
-        box = st.container()
+        # st.empty()는 호출할 때마다 같은 자리를 덮어쓴다. st.container()에 code()를
+        # 반복 호출하면 줄이 쌓일 때마다 새 블록이 계속 추가돼서 화면이 지저분해진다.
+        box = st.empty()
         lines = []
 
         def log(msg):
@@ -336,7 +339,11 @@ with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_r
                 st.success("분석 완료! 아래 결과가 새 영상 기준으로 갱신됐습니다.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"분석 중단: {exc}")
+                # 예외 메시지만 보여주면 원인을 알 수 없는 경우가 많다(예: KeyError는
+                # 키 이름만 나온다). 어디서 났는지까지 펼쳐볼 수 있게 남긴다.
+                st.error(f"분석 중단: {type(exc).__name__}: {exc}")
+                with st.expander("자세한 오류 내용 (개발자용)"):
+                    st.code(traceback.format_exc())
 
 missing = missing_required_files()
 if missing:
