@@ -15,10 +15,14 @@
 
 ## 빠른 시작 (앱)
 
-```bash
-pip install -r requirements.txt
-streamlit run src/app.py
+```powershell
+python -m venv venv                      # 처음 한 번만
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\streamlit.exe run src\app.py
 ```
+
+의존성은 `venv` 안에만 설치되므로, 스크립트를 직접 돌릴 때도
+`.\venv\Scripts\python.exe src\...` 형태로 가상환경 파이썬을 지정한다.
 
 앱에서 정답 영상과 내 영상을 올리고 **분석 실행**을 누르면, 돌핀킥 구간 검출부터
 비교 영상 생성까지 자동으로 진행된다. 영상 길이에 따라 몇 분 걸린다(관절 추출이 대부분).
@@ -71,9 +75,13 @@ export ANTHROPIC_API_KEY="sk-ant-..."      # Git Bash
 
 **3. 실행** — 앱을 켜기 전에 한 번 돌리면 됩니다.
 
-```bash
-python src/generate_feedback_llm.py
+```powershell
+.\venv\Scripts\python.exe src\generate_feedback_llm.py
 ```
+
+가상환경의 파이썬을 직접 지정하는 방식입니다. 그냥 `python`으로 실행하면 시스템
+파이썬이 잡혀서 `ModuleNotFoundError: No module named 'anthropic'`이 납니다
+(의존성은 `venv` 안에만 설치돼 있습니다).
 
 `output/comparison/feedback_llm.json`이 만들어지고, 앱이 이 파일을 발견하면 관절별
 영상 아래 문장을 LLM 문장으로 바꿔서 보여줍니다. **키가 없어도 앱은 정상 동작합니다** —
