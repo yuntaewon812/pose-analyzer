@@ -62,12 +62,21 @@ def analyze_one(role, start, end, step, seg_args, log=print, auto_detect=True):
     # 자유형 구간이 돌핀킥으로 잘못 분석될 수 있다.
     if auto_detect and start is None and end is None:
         log(f"[{role}] 돌핀킥 구간 자동 검출")
-        from detect_dolphin_kick import detect
+        from detect_dolphin_kick import detect, analyzable_segments
         segments, _detail = detect(ROOT / lm, ROOT / ang)
-        if segments:
-            start, end = max(segments, key=lambda s: s[1] - s[0])   # 가장 긴 구간
-            log(f"    -> {start:.2f}~{end:.2f}초 ({end - start:.2f}초) 사용"
-                f"{f' (후보 {len(segments)}개 중 가장 긴 것)' if len(segments) > 1 else ''}")
+        usable = analyzable_segments(segments)
+        if usable:
+            best = max(usable, key=lambda s: s["duration"])   # 가장 긴 구간
+            start, end = best["start"], best["end"]
+            log(f"    -> {start:.2f}~{end:.2f}초 ({best['duration']:.2f}초) 사용"
+                f"{f' (분석 가능 {len(usable)}개 중 가장 긴 것)' if len(usable) > 1 else ''}")
+        elif segments:
+            # 동작은 찾았는데 무릎이 안 잡히는 경우. 구간을 넓히면 될 일이 아니라
+            # 영상 자체의 한계이므로, 그 사실을 분명히 알린다.
+            worst = max(segments, key=lambda s: s["duration"])
+            log(f"    -> 돌핀킥 {len(segments)}개를 찾았지만 무릎 검출이 부족해 분석할 수 없습니다 "
+                f"(가장 긴 구간 {worst['start']:.1f}~{worst['end']:.1f}초, 무릎 {worst['knee_cov']*100:.0f}%). "
+                "영상 전체로 진행합니다.")
         else:
             log("    -> 돌핀킥 구간을 찾지 못했습니다. 영상 전체로 진행합니다 "
                 "(결과가 이상하면 구간을 직접 지정하세요)")

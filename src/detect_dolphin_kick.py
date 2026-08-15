@@ -136,11 +136,12 @@ def window_features(lm_win, ang_win):
 
 
 def failure_reasons(f, min_foot_amp):
-    """돌핀킥 조건 중 어긋난 항목을 사람이 읽을 수 있게 돌려준다 (빈 리스트면 통과).
+    """"이 창이 돌핀킥인가"에 어긋난 항목을 사람이 읽을 수 있게 돌려준다 (빈 리스트면 통과).
 
-    새 영상에서 구간을 못 찾았을 때 "왜"를 알아야 손을 쓸 수 있으므로, 통과/불통과만
-    돌려주지 않고 사유를 남긴다. (예: 다이빙 직후는 물거품 때문에 무릎 검출이 0%라
-    탈락하는데, 이건 기준을 낮춰서 될 일이 아니라 데이터가 없는 것이다.)
+    여기서는 **동작만** 본다. 무릎이 물거품에 가려 안 보이는 것은 "돌핀킥이 아니다"가
+    아니라 "쟀지만 분석은 못 한다"이므로 quality_reasons()로 따로 뺐다. 두 가지를
+    한데 묶으면 "무릎이 안 보임"이 "돌핀킥 없음"으로 보고돼서, 새 영상에서 무엇이
+    문제인지 알 수 없게 된다 (접영 영상에서 실제로 그런 일이 있었다).
     """
     if f is None:
         return ["표본 부족"]
@@ -159,13 +160,24 @@ def failure_reasons(f, min_foot_amp):
         out.append(f"엉덩이 움직임 작음 {f['hip_amp']:.2f} (플러터킥 의심)")
     if f["period"] < MIN_PERIODICITY:
         out.append(f"주기성 낮음 {f['period']:.2f}")
-    if f["knee_cov"] < MIN_KNEE_COVERAGE:
-        out.append(f"무릎 검출 {f['knee_cov'] * 100:.0f}% (물거품 등으로 가려짐)")
     return out
 
 
+def quality_reasons(f):
+    """"이 창을 분석할 수 있는가"에 어긋난 항목. 동작 판정과는 별개다.
+
+    이후 단계(segment_reps -> 각도 비교)가 무릎 각도를 기준 신호로 쓰기 때문에,
+    무릎이 안 잡히면 돌핀킥이 맞더라도 비교 분석을 할 수 없다.
+    """
+    if f is None:
+        return ["표본 부족"]
+    if f["knee_cov"] < MIN_KNEE_COVERAGE:
+        return [f"무릎 검출 {f['knee_cov'] * 100:.0f}% (물거품·화질 등으로 가려짐)"]
+    return []
+
+
 def is_dolphin(f, min_foot_amp):
-    """특징이 돌핀킥 조건을 모두 만족하는지."""
+    """동작이 돌핀킥 조건을 만족하는지 (분석 가능 여부는 보지 않는다)."""
     return not failure_reasons(f, min_foot_amp)
 
 
@@ -205,7 +217,22 @@ def detect(landmarks_path, angles_path, window=WINDOW_SEC, min_foot_amp=MIN_FOOT
         if ok:
             hits.append(float(w))
 
-    return merge_windows(hits, window), detail
+    # 동작으로 찾은 구간에, 그 구간이 실제로 분석 가능한지를 덧붙인다.
+    spans = merge_windows(hits, window)
+    segments = []
+    for a, b in spans:
+        inside = [f for w, f, ok in detail if ok and a <= w < b]
+        knee = float(np.mean([f["knee_cov"] for f in inside])) if inside else 0.0
+        amp = float(np.mean([f["foot_amp"] for f in inside])) if inside else float("nan")
+        segments.append({"start": a, "end": b, "duration": b - a,
+                         "knee_cov": knee, "foot_amp": amp,
+                         "analyzable": knee >= MIN_KNEE_COVERAGE})
+    return segments, detail
+
+
+def analyzable_segments(segments):
+    """분석까지 가능한 구간만 추린다. 파이프라인은 이 중에서 고른다."""
+    return [s for s in segments if s["analyzable"]]
 
 
 def main() -> None:
@@ -214,19 +241,26 @@ def main() -> None:
 
     segments, detail = detect(args.landmarks, args.angles, args.window, args.min_foot_amp)
 
+    usable = analyzable_segments(segments)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["segment_index", "start_sec", "end_sec", "duration_sec"])
-        for i, (a, b) in enumerate(segments):
-            w.writerow([i, round(a, 2), round(b, 2), round(b - a, 2)])
+        w.writerow(["segment_index", "start_sec", "end_sec", "duration_sec",
+                    "knee_coverage", "analyzable"])
+        for i, s in enumerate(segments):
+            w.writerow([i, round(s["start"], 2), round(s["end"], 2), round(s["duration"], 2),
+                        round(s["knee_cov"], 3), int(s["analyzable"])])
 
     print(f"검사한 창: {len(detail)}개 (창 {args.window}초, {HOP_SEC}초 간격)")
-    print(f"찾은 돌핀킥 구간: {len(segments)}개")
-    for i, (a, b) in enumerate(segments):
-        inside = [d for d in detail if a <= d[0] < b and d[2]]
-        amp = np.mean([d[1]["foot_amp"] for d in inside]) if inside else float("nan")
-        print(f"  #{i}  {a:6.2f} ~ {b:6.2f}초  ({b - a:4.2f}초)  발끝진폭 평균={amp:.2f}")
+    print(f"돌핀킥 동작 구간: {len(segments)}개  (그중 분석 가능: {len(usable)}개)")
+    for i, s in enumerate(segments):
+        mark = "분석 가능" if s["analyzable"] else f"분석 불가 - 무릎 검출 {s['knee_cov'] * 100:.0f}%"
+        print(f"  #{i}  {s['start']:6.2f} ~ {s['end']:6.2f}초  ({s['duration']:4.2f}초)  "
+              f"발끝진폭 {s['foot_amp']:.2f}  [{mark}]")
+    if segments and not usable:
+        print("  → 돌핀킥은 찾았지만 무릎이 충분히 검출되지 않아 비교 분석을 할 수 없습니다.")
+        print("    (화질이 더 좋거나 다리가 덜 가려진 영상이 필요합니다)")
     # 탈락 사유 집계 - 새 영상에서 구간을 못 찾았을 때 무엇이 문제인지 바로 보이게.
     reasons = {}
     for _w, f, ok in detail:
@@ -237,9 +271,15 @@ def main() -> None:
             key = r.split(" (")[0].rsplit(" ", 1)[0] if any(c.isdigit() for c in r) else r
             reasons[key] = reasons.get(key, 0) + 1
     if reasons:
-        print("\n제외된 창의 사유 (많은 순):")
+        print("\n돌핀킥 동작이 아니라고 본 사유 (많은 순):")
         for key, cnt in sorted(reasons.items(), key=lambda kv: -kv[1])[:6]:
             print(f"  {key:<22} {cnt:4d}개 창")
+
+    # 데이터 품질은 따로 집계한다. "동작은 맞는데 잴 수가 없다"를 구분해서 보여주기 위함.
+    poor = sum(1 for _w, f, ok in detail if ok and quality_reasons(f))
+    total_ok = sum(1 for _w, _f, ok in detail if ok)
+    if total_ok:
+        print(f"\n돌핀킥으로 본 창 {total_ok}개 중 무릎 미검출로 분석 불가: {poor}개")
 
     if not segments:
         print("\n조건을 만족하는 구간이 없습니다. 발 진폭이 컸던 창들과 탈락 사유:")
