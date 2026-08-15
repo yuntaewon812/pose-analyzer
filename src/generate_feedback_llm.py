@@ -134,6 +134,16 @@ def main() -> None:
         )
     except anthropic.RateLimitError:
         raise SystemExit("요청이 너무 잦습니다. 잠시 후 다시 실행하세요.")
+    # 키는 맞는데 계정에 크레딧이 없는 경우. 인증 실패(401)와 헷갈리기 쉬워서
+    # "키 문제가 아니라 잔액 문제"라는 걸 분명히 알려준다.
+    except anthropic.BadRequestError as e:
+        if "credit balance" in str(e).lower():
+            raise SystemExit(
+                "API 키는 정상이지만 계정 크레딧이 부족합니다.\n"
+                "  https://console.anthropic.com → Plans & Billing 에서 크레딧을 충전하세요.\n"
+                "  (Claude 구독(Pro/Max)과 API 크레딧은 별개입니다.)"
+            )
+        raise
     except anthropic.APIConnectionError:
         raise SystemExit("네트워크 연결에 실패했습니다. 인터넷 연결을 확인하세요.")
 
