@@ -35,6 +35,28 @@ DOLPHIN_KICK_ARGS = [
 ]
 
 
+def with_joint(seg_args, joint):
+    """segment_reps에 넘길 --joint 값을 바꾼 새 인자 목록을 돌려준다."""
+    args = list(seg_args)
+    if "--joint" in args:
+        args[args.index("--joint") + 1] = joint
+    else:
+        args += ["--joint", joint]
+    return args
+
+
+def pick_knee_side(angles_path, start=None, end=None):
+    """구간을 직접 지정했을 때도 잘 잡힌 쪽 무릎을 고른다 -> ("left"|"right", 검출률)."""
+    import pandas as pd
+    from detect_dolphin_kick import better_knee
+    ang = pd.read_csv(angles_path)
+    t = ang["time_sec"].values
+    lo = t.min() if start is None else start
+    hi = t.max() if end is None else end
+    ang = ang[(t >= lo) & (t <= hi)]
+    return better_knee(ang)
+
+
 def run(cmd, label, log=print):
     log(f"  $ {label}")
     # 자식 프로세스의 출력 인코딩을 UTF-8로 고정한다.
@@ -74,8 +96,13 @@ def analyze_one(role, start, end, step, seg_args, log=print, auto_detect=True):
         if usable:
             best = max(usable, key=lambda s: s["duration"])   # 가장 긴 구간
             start, end = best["start"], best["end"]
+            # 카메라에 가까운 쪽 다리가 잘 보이므로, 그 구간에서 실제로 잘 잡힌
+            # 무릎을 킥 사이클 기준으로 쓴다 (한쪽으로 고정하면 반대편에서 찍은
+            # 영상을 통째로 못 쓴다).
+            seg_args = with_joint(seg_args, f"{best['knee_side']}_knee")
             log(f"    -> {start:.2f}~{end:.2f}초 ({best['duration']:.2f}초) 사용"
-                f"{f' (분석 가능 {len(usable)}개 중 가장 긴 것)' if len(usable) > 1 else ''}")
+                f"{f' (분석 가능 {len(usable)}개 중 가장 긴 것)' if len(usable) > 1 else ''}"
+                f" / 기준 관절 {best['knee_side']}_knee (무릎 검출 {best['knee_cov']*100:.0f}%)")
         # 아래 두 경우에는 영상 전체로 진행하지 않고 멈춘다. 전체를 훑으면
         # 돌핀킥과 무관한 구간이 "반복 동작"으로 잡혀서(실제로 84초 지점의 0.76초짜리
         # 구간이 잡힌 적이 있다) 그럴듯해 보이는 엉뚱한 결과가 나온다.
@@ -94,6 +121,12 @@ def analyze_one(role, start, end, step, seg_args, log=print, auto_detect=True):
                 "수중에서 양팔을 앞으로 모아 뻗고 발차기하는 구간이 2초 이상 있어야 합니다. "
                 "구간을 직접 지정하거나, 자동 검출을 끄고 다시 시도해 보세요."
             )
+
+    else:
+        # 구간을 직접 지정한 경우에도 잘 보이는 쪽 무릎을 기준으로 삼는다.
+        side, cov = pick_knee_side(ROOT / ang, start, end)
+        seg_args = with_joint(seg_args, f"{side}_knee")
+        log(f"[{role}] 기준 관절 {side}_knee (무릎 검출 {cov * 100:.0f}%)")
 
     log(f"[{role}] 반복 구간 나누기")
     cmd = ["src/segment_reps.py", "--input", ang, "--landmarks", lm, "--output", reps, *seg_args]

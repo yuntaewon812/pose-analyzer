@@ -91,6 +91,19 @@ def periodicity(sig):
     return float(ac[lo:].max()) if len(ac) > lo else 0.0
 
 
+def better_knee(ang_win):
+    """좌우 무릎 중 각도가 더 잘 계산된 쪽을 고른다 -> ("left"|"right", 검출률).
+
+    카메라가 어느 쪽에 있느냐에 따라 가까운 쪽 다리는 잘 보이고 반대쪽은 몸에
+    가려진다. 실제로 한 영상에서 왼쪽 무릎 신뢰도는 0.405(기준 0.5 미달)라
+    각도가 2%만 계산된 반면, 오른쪽은 0.913으로 100% 계산됐다. 한쪽으로
+    고정하면 촬영 방향이 반대인 영상을 통째로 못 쓰게 된다.
+    """
+    left = float(ang_win["left_knee"].notna().mean())
+    right = float(ang_win["right_knee"].notna().mean())
+    return ("left", left) if left >= right else ("right", right)
+
+
 def window_features(lm_win, ang_win):
     """창 하나의 특징을 계산한다. 데이터가 모자라면 None."""
     if len(lm_win) < 12:
@@ -129,10 +142,11 @@ def window_features(lm_win, ang_win):
     # 돌핀킥 1.72와 겹쳤다) 이 신호를 함께 본다.
     hip_amp = float((np.nanmax(hy) - np.nanmin(hy)) / torso) if np.isfinite(hy).any() else 0.0
 
-    knee_cov = float(ang_win["left_knee"].notna().mean())
+    knee_side, knee_cov = better_knee(ang_win)
 
     return dict(arm_move=arm_move, arm_ext=arm_ext, shoulder_asym=shoulder_asym,
-                foot_amp=foot_amp, period=period, hip_amp=hip_amp, knee_cov=knee_cov)
+                foot_amp=foot_amp, period=period, hip_amp=hip_amp,
+                knee_cov=knee_cov, knee_side=knee_side)
 
 
 def failure_reasons(f, min_foot_amp):
@@ -224,8 +238,12 @@ def detect(landmarks_path, angles_path, window=WINDOW_SEC, min_foot_amp=MIN_FOOT
         inside = [f for w, f, ok in detail if ok and a <= w < b]
         knee = float(np.mean([f["knee_cov"] for f in inside])) if inside else 0.0
         amp = float(np.mean([f["foot_amp"] for f in inside])) if inside else float("nan")
+        # 이 구간에서 어느 쪽 무릎을 써야 하는지도 함께 남긴다. 이후 단계가
+        # 킥 사이클을 자를 때 이 관절을 기준 신호로 쓴다.
+        sides = [f["knee_side"] for f in inside]
+        side = max(set(sides), key=sides.count) if sides else "left"
         segments.append({"start": a, "end": b, "duration": b - a,
-                         "knee_cov": knee, "foot_amp": amp,
+                         "knee_cov": knee, "knee_side": side, "foot_amp": amp,
                          "analyzable": knee >= MIN_KNEE_COVERAGE})
     return segments, detail
 
