@@ -233,6 +233,30 @@ def save_upload(uploaded, dest):
     dest.write_bytes(uploaded.getbuffer())
 
 
+MIN_GOOD_HEIGHT = 720   # 이 아래면 수중 영상에서 관절 검출이 자주 실패한다
+
+
+def check_resolution(path, label):
+    """영상 해상도를 확인해 화면에 알린다. 낮으면 경고하되 분석은 막지 않는다.
+
+    저화질이 분석 실패의 흔한 원인인데, 실패 메시지("어깨 미검출")만 봐서는
+    화질 문제인지 알기 어렵다. 그래서 분석 전에 미리 짚어준다.
+    """
+    cap = cv2.VideoCapture(str(path))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    if h <= 0:
+        return
+    if h < MIN_GOOD_HEIGHT:
+        st.warning(
+            f"**{label}: {w}x{h}** — 권장 화질({MIN_GOOD_HEIGHT}p)보다 낮습니다. "
+            "관절을 못 찾아 분석이 실패할 수 있습니다. 분석은 계속 진행합니다.",
+            icon="⚠️",
+        )
+    else:
+        st.caption(f"{label}: {w}x{h} — 화질 충분")
+
+
 def fetch_link(url, dest, log=lambda m: None):
     """유튜브 등 링크에서 영상을 받아 dest에 저장한다.
 
@@ -251,6 +275,17 @@ with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_r
     st.caption(
         "정답 영상과 내 영상을 올린 뒤 **분석 실행**을 누르면 관절 추출부터 비교 영상까지 다시 만듭니다. "
         "영상 길이에 따라 몇 분 걸립니다 (관절 추출이 대부분)."
+    )
+    st.warning(
+        "**영상 화질이 분석 성공을 좌우합니다 — 720p 이상을 권장합니다.**\n\n"
+        "수중 촬영은 물빛과 물거품 때문에 사람 모양이 흐릿해서, 화질이 낮으면 프로그램이 "
+        "무릎·엉덩이 위치를 찾지 못합니다. 실제로 480x360 영상에서는 관절 신뢰도가 "
+        "0.12~0.46(기준 0.5)까지 떨어져 동작 판정 자체가 불가능했고, 같은 영상을 "
+        "1440x1080으로 다시 받으니 정상 분석됐습니다.\n\n"
+        "- **링크를 붙여넣으면** 그 영상에서 가능한 가장 좋은 화질을 자동으로 받아옵니다 (권장)\n"
+        "- **파일을 올리면** 그 파일의 화질이 그대로 쓰입니다 — 낮으면 높일 방법이 없습니다\n"
+        "- 몸 전체가 화면에 크게 잡히고, 다리가 물거품에 덜 가린 구간이 있는 영상이 좋습니다",
+        icon="🎥",
     )
     src_mode = st.radio(
         "영상을 어떻게 넣을까요?", ["파일 올리기", "링크 붙여넣기"],
@@ -327,6 +362,8 @@ with st.expander("📤 영상 올리고 새로 분석하기", expanded=missing_r
         elif not REF_VIDEO.exists() or not MINE_VIDEO.exists():
             st.error("정답 영상과 내 영상이 모두 필요합니다.")
         else:
+            check_resolution(REF_VIDEO, "정답 영상")
+            check_resolution(MINE_VIDEO, "내 영상")
             try:
                 with st.spinner("분석 중… 관절 추출이 가장 오래 걸립니다"):
                     run_all(

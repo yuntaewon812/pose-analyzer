@@ -35,23 +35,46 @@ def download(url: str, filename: str) -> None:
     SAVE_DIR.mkdir(parents=True, exist_ok=True)
     dest = SAVE_DIR / filename
 
-    options = {
-        # 720p 이하 mp4로 다운로드 (포즈 추정에는 720p면 충분하고 처리 속도가 빠름)
-        "format": "best[height<=720][ext=mp4]/best[ext=mp4]/best",
+    base = {
         # 파일명을 고정 -> extract_pose.py --video 인자와 그대로 맞물림
         "outtmpl": str(dest),
-        # 이미 있으면 덮어쓰지 않고 물어보지 않게(스크립트 재실행 편의를 위해 덮어쓰기)
+        # 이미 있으면 물어보지 않고 덮어쓰기 (스크립트 재실행 편의)
         "overwrites": True,
-        # 유튜브 기본 경로가 "HTTP Error 403: Forbidden"으로 막히는 경우가 있어서
-        # 앱(클라이언트) 종류를 여러 개 지정해 순서대로 시도하게 한다. 하나가 막혀도
-        # 다른 것으로 넘어가므로 성공률이 크게 올라간다.
-        "extractor_args": {"youtube": {"player_client": ["android", "web_safari", "tv"]}},
+        # 이어받기 끄기. 앞선 시도가 남긴 조각 파일(.part)을 이어받으려다
+        # "HTTP Error 416: Requested range not satisfiable"로 실패한 적이 있다.
+        "continuedl": False,
     }
 
-    with yt_dlp.YoutubeDL(options) as ydl:
-        ydl.download([url])
+    # 해상도가 낮으면 관절 검출 신뢰도가 크게 떨어진다. 실제로 480x360으로 받은
+    # 영상에서 어깨 0.46 / 엉덩이 0.12 / 무릎 0.34로 기준(0.5)에 미달해 동작 판정
+    # 자체가 불가능했는데, 같은 영상에 2704x2028 화질이 올라와 있었다.
+    #
+    # 유튜브에서 "영상+음성이 한 파일"인 포맷은 360p까지뿐이고, 고화질은 영상과
+    # 음성이 분리돼 있다. 포즈 분석에 음성은 필요 없으므로 bv*(영상만)를 받으면
+    # 고화질을 쓰면서 합치는 과정(ffmpeg)도 생략된다.
+    #
+    # 2순위는 403 우회용이다. 기본 경로가 "HTTP Error 403: Forbidden"으로 막힐 때가
+    # 있어서 클라이언트를 바꿔 시도하는데, 이 클라이언트들은 480x360만 노출하므로
+    # 어디까지나 최후의 수단이다 (실제로 이걸 1순위로 뒀다가 저화질만 받은 적이 있다).
+    attempts = [
+        ("고화질(영상만)", {**base, "format": "bv*[height<=1080][ext=mp4]/bv*[height<=1080]"}),
+        ("호환 모드(403 우회)", {**base,
+                             "format": "best[ext=mp4]/best",
+                             "extractor_args": {"youtube": {"player_client": ["android", "web_safari", "tv"]}}}),
+    ]
 
-    print(f"\n다운로드 완료! 저장 위치: {dest}")
+    last_error = None
+    for label, options in attempts:
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.download([url])
+            print(f"\n다운로드 완료 ({label}): {dest}")
+            return
+        except Exception as exc:      # noqa: BLE001 - 다음 방법으로 넘어가기 위해
+            print(f"  {label} 실패: {str(exc).splitlines()[-1][:120]}")
+            last_error = exc
+
+    raise RuntimeError(f"영상을 받지 못했습니다: {last_error}")
 
 
 if __name__ == "__main__":
