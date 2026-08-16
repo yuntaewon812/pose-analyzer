@@ -16,6 +16,7 @@ segment_reps -> normalize_* -> compare -> feedback -> render). 앱에서 영상�
     python src/run_pipeline.py --ref-start 14.8 --ref-end 18.6 --mine-start 13.0 --mine-end 17.3
 """
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +37,12 @@ DOLPHIN_KICK_ARGS = [
 
 def run(cmd, label, log=print):
     log(f"  $ {label}")
-    res = subprocess.run([sys.executable, *cmd], cwd=str(ROOT),
+    # 자식 프로세스의 출력 인코딩을 UTF-8로 고정한다.
+    # 한글 윈도우의 기본 인코딩은 cp949라, 파이프로 출력할 때 '—' 같은 문자를
+    # print하면 UnicodeEncodeError로 스크립트가 죽는다. 여기서 encoding="utf-8"은
+    # "받아서 해석할 때" 쓰는 값이라 자식 쪽 출력에는 영향을 주지 못한다.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    res = subprocess.run([sys.executable, *cmd], cwd=str(ROOT), env=env,
                          capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         raise RuntimeError(f"{label} 실패:\n{(res.stderr or res.stdout)[-1500:]}")
@@ -70,16 +76,24 @@ def analyze_one(role, start, end, step, seg_args, log=print, auto_detect=True):
             start, end = best["start"], best["end"]
             log(f"    -> {start:.2f}~{end:.2f}초 ({best['duration']:.2f}초) 사용"
                 f"{f' (분석 가능 {len(usable)}개 중 가장 긴 것)' if len(usable) > 1 else ''}")
+        # 아래 두 경우에는 영상 전체로 진행하지 않고 멈춘다. 전체를 훑으면
+        # 돌핀킥과 무관한 구간이 "반복 동작"으로 잡혀서(실제로 84초 지점의 0.76초짜리
+        # 구간이 잡힌 적이 있다) 그럴듯해 보이는 엉뚱한 결과가 나온다.
         elif segments:
-            # 동작은 찾았는데 무릎이 안 잡히는 경우. 구간을 넓히면 될 일이 아니라
-            # 영상 자체의 한계이므로, 그 사실을 분명히 알린다.
             worst = max(segments, key=lambda s: s["duration"])
-            log(f"    -> 돌핀킥 {len(segments)}개를 찾았지만 무릎 검출이 부족해 분석할 수 없습니다 "
-                f"(가장 긴 구간 {worst['start']:.1f}~{worst['end']:.1f}초, 무릎 {worst['knee_cov']*100:.0f}%). "
-                "영상 전체로 진행합니다.")
+            raise RuntimeError(
+                f"[{role}] 돌핀킥 {len(segments)}개를 찾았지만 무릎이 충분히 검출되지 않아 "
+                f"분석할 수 없습니다 (가장 긴 구간 {worst['start']:.1f}~{worst['end']:.1f}초, "
+                f"무릎 검출 {worst['knee_cov']*100:.0f}%).\n"
+                "물거품이나 화질 때문에 다리가 가려진 경우입니다. 다리가 잘 보이는 영상을 쓰거나, "
+                "분석할 구간을 직접 지정해 보세요."
+            )
         else:
-            log("    -> 돌핀킥 구간을 찾지 못했습니다. 영상 전체로 진행합니다 "
-                "(결과가 이상하면 구간을 직접 지정하세요)")
+            raise RuntimeError(
+                f"[{role}] 이 영상에서 돌핀킥 구간을 찾지 못했습니다.\n"
+                "수중에서 양팔을 앞으로 모아 뻗고 발차기하는 구간이 2초 이상 있어야 합니다. "
+                "구간을 직접 지정하거나, 자동 검출을 끄고 다시 시도해 보세요."
+            )
 
     log(f"[{role}] 반복 구간 나누기")
     cmd = ["src/segment_reps.py", "--input", ang, "--landmarks", lm, "--output", reps, *seg_args]
